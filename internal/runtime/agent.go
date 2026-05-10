@@ -31,6 +31,13 @@ type sessionDetailCall struct {
 	err    error
 }
 
+type sessionDetailMode int
+
+const (
+	sessionDetailModeLimited sessionDetailMode = iota
+	sessionDetailModeFull
+)
+
 type Agent struct {
 	cfg     config.Config
 	logger  *slog.Logger
@@ -41,7 +48,7 @@ type Agent struct {
 	worklog *worklog.Logger
 	started time.Time
 
-	sessionDetailMu      sync.Mutex
+	sessionDetailMu       sync.Mutex
 	sessionDetailInFlight map[string]*sessionDetailCall
 }
 
@@ -156,7 +163,16 @@ func (a *Agent) ListSessions() []SessionSummary {
 }
 
 func (a *Agent) SessionDetail(ctx context.Context, threadID string) (SessionDetail, error) {
-	call, owner := a.beginSessionDetailCall(threadID)
+	return a.sessionDetail(ctx, threadID, sessionDetailModeLimited)
+}
+
+func (a *Agent) FullSessionDetail(ctx context.Context, threadID string) (SessionDetail, error) {
+	return a.sessionDetail(ctx, threadID, sessionDetailModeFull)
+}
+
+func (a *Agent) sessionDetail(ctx context.Context, threadID string, mode sessionDetailMode) (SessionDetail, error) {
+	callKey := sessionDetailCallKey(threadID, mode)
+	call, owner := a.beginSessionDetailCall(callKey)
 	if !owner {
 		select {
 		case <-ctx.Done():
@@ -166,9 +182,13 @@ func (a *Agent) SessionDetail(ctx context.Context, threadID string) (SessionDeta
 		}
 	}
 
-	detail, err := a.loadSessionDetail(ctx, threadID)
-	a.finishSessionDetailCall(threadID, call, detail, err)
+	detail, err := a.loadSessionDetail(ctx, threadID, mode)
+	a.finishSessionDetailCall(callKey, call, detail, err)
 	return detail, err
+}
+
+func sessionDetailCallKey(threadID string, mode sessionDetailMode) string {
+	return fmt.Sprintf("%d:%s", mode, threadID)
 }
 
 func (a *Agent) beginSessionDetailCall(threadID string) (*sessionDetailCall, bool) {
@@ -198,7 +218,7 @@ func (a *Agent) finishSessionDetailCall(threadID string, call *sessionDetailCall
 	a.sessionDetailMu.Unlock()
 }
 
-func (a *Agent) loadSessionDetail(ctx context.Context, threadID string) (SessionDetail, error) {
+func (a *Agent) loadSessionDetail(ctx context.Context, threadID string, mode sessionDetailMode) (SessionDetail, error) {
 	var response codex.ThreadReadResponse
 	if err := a.client.Call(ctx, "thread/read", map[string]any{
 		"threadId":     threadID,
@@ -209,7 +229,7 @@ func (a *Agent) loadSessionDetail(ctx context.Context, threadID string) (Session
 			if !ok {
 				return SessionDetail{}, err
 			}
-			return toSessionDetail(record, pendingCountForThread(a.store.SnapshotPending(), threadID), a.files), nil
+			return a.renderSessionDetail(record, pendingCountForThread(a.store.SnapshotPending(), threadID), mode), nil
 		}
 		return SessionDetail{}, err
 	}
@@ -222,7 +242,14 @@ func (a *Agent) loadSessionDetail(ctx context.Context, threadID string) (Session
 
 	pendingCount := pendingCountForThread(a.store.SnapshotPending(), threadID)
 
-	return toSessionDetail(record, pendingCount, a.files), nil
+	return a.renderSessionDetail(record, pendingCount, mode), nil
+}
+
+func (a *Agent) renderSessionDetail(record store.SessionRecord, pendingCount int, mode sessionDetailMode) SessionDetail {
+	if mode == sessionDetailModeFull {
+		return toFullSessionDetail(record, pendingCount, a.files)
+	}
+	return toSessionDetail(record, pendingCount, a.files)
 }
 
 func (a *Agent) PendingRequests() []PendingRequestView {

@@ -196,7 +196,13 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
 
-		detail, err := s.agent.SessionDetail(ctx, sessionID)
+		var detail runtime.SessionDetail
+		var err error
+		if wantsFullSessionDetail(r) {
+			detail, err = s.agent.FullSessionDetail(ctx, sessionID)
+		} else {
+			detail, err = s.agent.SessionDetail(ctx, sessionID)
+		}
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err)
 			return
@@ -325,6 +331,15 @@ func (s *Server) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		writeErrorMessage(w, http.StatusNotFound, fmt.Sprintf("unsupported session action %q", action))
+	}
+}
+
+func wantsFullSessionDetail(r *http.Request) bool {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("full"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -49,8 +49,13 @@ type SessionSummary struct {
 }
 
 type SessionDetail struct {
-	Summary SessionSummary `json:"summary"`
-	Turns   []TurnDetail   `json:"turns"`
+	Summary      SessionSummary `json:"summary"`
+	Turns        []TurnDetail   `json:"turns"`
+	TotalTurns   int            `json:"totalTurns"`
+	OmittedTurns int            `json:"omittedTurns"`
+	TotalItems   int            `json:"totalItems"`
+	OmittedItems int            `json:"omittedItems"`
+	Limited      bool           `json:"limited"`
 }
 
 type TurnDetail struct {
@@ -64,6 +69,9 @@ type TurnDetail struct {
 	PlanExplanation string     `json:"planExplanation"`
 	Plan            []PlanStep `json:"plan"`
 	Items           []TurnItem `json:"items"`
+	TotalItems      int        `json:"totalItems"`
+	OmittedItems    int        `json:"omittedItems"`
+	Limited         bool       `json:"limited"`
 }
 
 type PlanStep struct {
