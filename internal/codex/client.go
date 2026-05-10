@@ -2,6 +2,7 @@ package codex
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"log/slog"
 	"os/exec"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -211,33 +211,40 @@ func (c *Client) writeJSON(value any) error {
 }
 
 func (c *Client) readLoop(reader io.Reader) {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	buffered := bufio.NewReaderSize(reader, 1024*1024)
+	for {
+		line, err := buffered.ReadBytes('\n')
+		if len(line) > 0 {
+			c.handleStdoutLine(line)
 		}
-
-		var envelope rpcEnvelope
-		if err := json.Unmarshal([]byte(line), &envelope); err != nil {
-			c.logger.Warn("failed to decode app-server message", "error", err, "payload", line)
-			continue
-		}
-
-		switch {
-		case envelope.Method != "" && len(envelope.ID) > 0:
-			c.serverReqs <- ServerRequest{ID: envelope.ID, Method: envelope.Method, Params: envelope.Params}
-		case envelope.Method != "":
-			c.notifications <- Notification{Method: envelope.Method, Params: envelope.Params}
-		case len(envelope.ID) > 0:
-			c.dispatchResponse(envelope)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				c.logger.Error("app-server stdout reader failed", "error", err)
+			}
+			return
 		}
 	}
+}
 
-	if err := scanner.Err(); err != nil {
-		c.logger.Error("app-server stdout reader failed", "error", err)
+func (c *Client) handleStdoutLine(raw []byte) {
+	line := bytes.TrimSpace(raw)
+	if len(line) == 0 {
+		return
+	}
+
+	var envelope rpcEnvelope
+	if err := json.Unmarshal(line, &envelope); err != nil {
+		c.logger.Warn("failed to decode app-server message", "error", err, "payloadBytes", len(line))
+		return
+	}
+
+	switch {
+	case envelope.Method != "" && len(envelope.ID) > 0:
+		c.serverReqs <- ServerRequest{ID: envelope.ID, Method: envelope.Method, Params: envelope.Params}
+	case envelope.Method != "":
+		c.notifications <- Notification{Method: envelope.Method, Params: envelope.Params}
+	case len(envelope.ID) > 0:
+		c.dispatchResponse(envelope)
 	}
 }
 
