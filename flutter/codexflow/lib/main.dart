@@ -1,0 +1,136 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'screens/approval_screen.dart';
+import 'screens/artifacts_screen.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/settings_screen.dart';
+import 'state/app_model.dart';
+import 'theme/palette.dart';
+import 'widgets/common.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  runApp(CodexFlowApp(prefs: prefs));
+}
+
+class CodexFlowApp extends StatelessWidget {
+  const CodexFlowApp({
+    super.key,
+    required this.prefs,
+  });
+
+  final SharedPreferences prefs;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider<AppModel>(
+      create: (_) => AppModel(prefs)..bootstrap(),
+      child: MaterialApp(
+        title: 'CodexFlow',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          useMaterial3: true,
+          scaffoldBackgroundColor: Palette.canvas,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Palette.softBlue,
+            primary: Palette.softBlue,
+            secondary: Palette.accent,
+            surface: Palette.canvas,
+          ),
+          appBarTheme: AppBarTheme(
+            backgroundColor: Palette.canvas,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            centerTitle: true,
+            iconTheme: const IconThemeData(color: Palette.mutedInk),
+            titleTextStyle: roundedTextStyle(size: 17, weight: FontWeight.w600),
+          ),
+          bottomSheetTheme: const BottomSheetThemeData(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+          ),
+          dividerColor: Colors.transparent,
+        ),
+        home: const HomeShell(),
+      ),
+    );
+  }
+}
+
+class HomeShell extends StatefulWidget {
+  const HomeShell({super.key});
+
+  @override
+  State<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends State<HomeShell> {
+  int _index = 0;
+  Timer? _timer;
+
+  static const _pages = <Widget>[
+    DashboardScreen(),
+    ApprovalScreen(),
+    ArtifactsScreen(),
+    SettingsScreen(),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _timer = Timer.periodic(const Duration(seconds: 8), (_) {
+        if (!mounted) {
+          return;
+        }
+        unawaited(context.read<AppModel>().refreshDashboard());
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Palette.canvas,
+      body: IndexedStack(
+        index: _index,
+        children: _pages,
+      ),
+      bottomNavigationBar: NavigationBar(
+        backgroundColor: Palette.panelStrong,
+        indicatorColor: Palette.softBlue.appOpacity(0.12),
+        selectedIndex: _index,
+        onDestinationSelected: (value) => setState(() => _index = value),
+        destinations: const <NavigationDestination>[
+          NavigationDestination(
+            icon: Icon(Icons.grid_view_rounded),
+            label: '会话',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.checklist_rounded),
+            label: '审批',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.folder_open_rounded),
+            label: '文件',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.tune_rounded),
+            label: '设置',
+          ),
+        ],
+      ),
+    );
+  }
+}
